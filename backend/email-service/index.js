@@ -101,9 +101,51 @@ if (missingVars.length > 0) {
   console.log('✅ Todas as variáveis de ambiente carregadas com sucesso');
 }
 
+// Store para rate limiting
+const requestCounts = new Map();
+
+// Middleware de rate limiting global
+const rateLimitMiddleware = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  const windowMs = 60000; // 1 minuto
+  const maxRequests = 30; // máximo 30 requests por minuto
+
+  // Limpar registros antigos
+  const cutoff = now - windowMs;
+  for (const [key, data] of requestCounts.entries()) {
+    if (data.timestamp < cutoff) {
+      requestCounts.delete(key);
+    }
+  }
+
+  // Verificar limite para este IP
+  const current = requestCounts.get(ip) || { count: 0, timestamp: now };
+  if (current.timestamp < cutoff) {
+    // Reset contador se janela expirou
+    current.count = 1;
+    current.timestamp = now;
+  } else {
+    current.count++;
+  }
+
+  requestCounts.set(ip, current);
+
+  if (current.count > maxRequests) {
+    return res.status(429).json({
+      success: false,
+      message: 'Muitas requisições. Tente novamente em 1 minuto.',
+      retryAfter: Math.ceil((windowMs - (now - current.timestamp)) / 1000)
+    });
+  }
+
+  next();
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(rateLimitMiddleware);
 
 // Configuração do transportador de e-mail
 const transporter = nodemailer.createTransport({
@@ -121,18 +163,27 @@ const transporter = nodemailer.createTransport({
 
 // Configuração do banco de dados
 const dbConfig = {
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: process.env.DB_PORT || 3306,
+  user: process.env.DB_USER || 'vibe_user',
+  password: process.env.DB_PASSWORD || 'vibe_password',
+  database: process.env.DB_NAME || 'vibe',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true
 };
 
 // Pool de conexões do banco
-const pool = mysql.createPool(dbConfig);
+let pool;
+try {
+  pool = mysql.createPool(dbConfig);
+  console.log('✅ Pool de conexões MySQL criado');
+} catch (error) {
+  console.error('❌ Erro ao criar pool MySQL:', error);
+}
 
 // Função para gerar código de verificação
 function generateVerificationCode() {
@@ -430,6 +481,14 @@ app.get('/health', (req, res) => {
 // Rota para enviar e-mail de verificação
 app.post('/send-verification', async (req, res) => {
   try {
+    // Verificar se o pool está disponível
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        message: 'Serviço de banco de dados indisponível'
+      });
+    }
+
     const { email, firstName, userId } = req.body;
 
     if (!email || !firstName || !userId) {
