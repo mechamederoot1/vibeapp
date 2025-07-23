@@ -61,7 +61,7 @@ PORT=3001
 }
 
 // Debug do arquivo .env
-console.log('��� Variáveis SMTP carregadas:');
+console.log('📋 Variáveis SMTP carregadas:');
 console.log('  - SMTP_HOST:', process.env.SMTP_HOST || 'undefined');
 console.log('  - SMTP_PORT:', process.env.SMTP_PORT || 'undefined');
 console.log('  - SMTP_USER:', process.env.SMTP_USER || 'undefined');
@@ -481,6 +481,14 @@ app.get('/health', (req, res) => {
 // Rota para enviar e-mail de verificação
 app.post('/send-verification', async (req, res) => {
   try {
+    // Verificar se o pool está disponível
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        message: 'Serviço de banco de dados indisponível'
+      });
+    }
+
     const { email, firstName, userId } = req.body;
 
     if (!email || !firstName || !userId) {
