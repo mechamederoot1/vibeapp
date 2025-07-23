@@ -61,7 +61,7 @@ PORT=3001
 }
 
 // Debug do arquivo .env
-console.log('📋 Variáveis SMTP carregadas:');
+console.log('��� Variáveis SMTP carregadas:');
 console.log('  - SMTP_HOST:', process.env.SMTP_HOST || 'undefined');
 console.log('  - SMTP_PORT:', process.env.SMTP_PORT || 'undefined');
 console.log('  - SMTP_USER:', process.env.SMTP_USER || 'undefined');
@@ -101,9 +101,51 @@ if (missingVars.length > 0) {
   console.log('✅ Todas as variáveis de ambiente carregadas com sucesso');
 }
 
+// Store para rate limiting
+const requestCounts = new Map();
+
+// Middleware de rate limiting global
+const rateLimitMiddleware = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  const windowMs = 60000; // 1 minuto
+  const maxRequests = 30; // máximo 30 requests por minuto
+
+  // Limpar registros antigos
+  const cutoff = now - windowMs;
+  for (const [key, data] of requestCounts.entries()) {
+    if (data.timestamp < cutoff) {
+      requestCounts.delete(key);
+    }
+  }
+
+  // Verificar limite para este IP
+  const current = requestCounts.get(ip) || { count: 0, timestamp: now };
+  if (current.timestamp < cutoff) {
+    // Reset contador se janela expirou
+    current.count = 1;
+    current.timestamp = now;
+  } else {
+    current.count++;
+  }
+
+  requestCounts.set(ip, current);
+
+  if (current.count > maxRequests) {
+    return res.status(429).json({
+      success: false,
+      message: 'Muitas requisições. Tente novamente em 1 minuto.',
+      retryAfter: Math.ceil((windowMs - (now - current.timestamp)) / 1000)
+    });
+  }
+
+  next();
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(rateLimitMiddleware);
 
 // Configuração do transportador de e-mail
 const transporter = nodemailer.createTransport({
