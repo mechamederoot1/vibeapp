@@ -122,13 +122,16 @@ const transporter = nodemailer.createTransport({
 // Configuração do banco de dados
 const dbConfig = {
   host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
+  port: parseInt(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true
 };
 
 // Pool de conexões do banco
@@ -430,9 +433,16 @@ app.get('/health', (req, res) => {
 // Rota para enviar e-mail de verificação
 app.post('/send-verification', async (req, res) => {
   try {
+    console.log('📧 Recebida solicitação de verificação:', {
+      email: req.body.email,
+      firstName: req.body.firstName,
+      userId: req.body.userId
+    });
+
     const { email, firstName, userId } = req.body;
 
     if (!email || !firstName || !userId) {
+      console.log('❌ Dados obrigatórios faltando:', { email: !!email, firstName: !!firstName, userId: !!userId });
       return res.status(400).json({
         success: false,
         message: 'E-mail, nome e ID do usuário são obrigatórios'
@@ -442,12 +452,14 @@ app.post('/send-verification', async (req, res) => {
     // Verificar se o e-mail é válido
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
+      console.log('❌ E-mail inválido:', email);
       return res.status(400).json({
         success: false,
         message: 'E-mail inválido'
       });
     }
 
+    console.log('🔍 Verificando limite de tentativas...');
     // Verificar limite de tentativas (anti-spam)
     const [existingAttempts] = await pool.execute(
       `SELECT COUNT(*) as count FROM email_verifications 
@@ -456,6 +468,7 @@ app.post('/send-verification', async (req, res) => {
     );
 
     if (existingAttempts[0].count >= process.env.MAX_RESEND_ATTEMPTS) {
+      console.log('❌ Muitas tentativas para usuário:', userId);
       return res.status(429).json({
         success: false,
         message: 'Muitas tentativas. Tente novamente em 1 hora.',
@@ -463,6 +476,7 @@ app.post('/send-verification', async (req, res) => {
       });
     }
 
+    console.log('🔍 Verificando cooldown...');
     // Verificar cooldown entre envios
     const [lastAttempt] = await pool.execute(
       `SELECT created_at FROM email_verifications 
@@ -476,6 +490,7 @@ app.post('/send-verification', async (req, res) => {
       
       if (timeSinceLastAttempt < cooldownMs) {
         const remainingTime = Math.ceil((cooldownMs - timeSinceLastAttempt) / 1000);
+        console.log('❌ Cooldown ativo:', remainingTime, 'segundos restantes');
         return res.status(429).json({
           success: false,
           message: `Aguarde ${remainingTime} segundos antes de solicitar um novo código`,
@@ -489,6 +504,10 @@ app.post('/send-verification', async (req, res) => {
     const verificationToken = generateVerificationToken();
     const expiresAt = new Date(Date.now() + parseInt(process.env.VERIFICATION_CODE_EXPIRY));
 
+    console.log('📝 Gerando código:', verificationCode);
+    console.log('🔗 Gerando token:', verificationToken.substring(0, 10) + '...');
+
+    console.log('💾 Salvando no banco de dados...');
     // Salvar no banco de dados
     await pool.execute(
       `INSERT INTO email_verifications (user_id, email, verification_code, verification_token, expires_at, created_at, attempts)
@@ -503,6 +522,9 @@ app.post('/send-verification', async (req, res) => {
       [userId, email, verificationCode, verificationToken, expiresAt]
     );
 
+    console.log('✅ Dados salvos no banco!');
+    console.log('📧 Preparando e-mail...');
+
     // Enviar e-mail
     const mailOptions = {
       from: {
@@ -514,9 +536,12 @@ app.post('/send-verification', async (req, res) => {
       html: getEmailTemplate(firstName, verificationCode, verificationToken)
     };
 
+    console.log('📤 Enviando e-mail via SMTP...');
     await transporter.sendMail(mailOptions);
 
-    console.log(`✅ E-mail de verificação enviado para: ${email}`);
+    console.log(`✅ E-mail de verificação enviado com sucesso para: ${email}`);
+    console.log(`📋 Código: ${verificationCode}`);
+    console.log(`⏰ Expira em: ${expiresAt}`);
 
     res.json({
       success: true,
@@ -526,10 +551,16 @@ app.post('/send-verification', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro ao enviar e-mail:', error);
+    console.error('❌ Erro detalhado ao enviar e-mail:');
+    console.error('   Tipo:', error.constructor.name);
+    console.error('   Mensagem:', error.message);
+    console.error('   Código:', error.code);
+    console.error('   Stack completo:', error.stack);
+    
     res.status(500).json({
       success: false,
-      message: 'Erro interno do servidor ao enviar e-mail'
+      message: 'Erro interno do servidor ao enviar e-mail',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

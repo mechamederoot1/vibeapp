@@ -8,7 +8,9 @@
     "dev": "nodemon index.js",
     "setup": "node setup.js",
     "test": "node test-service.js",
-    "test-db": "node test_db_connection.js"
+    "test-db": "node test-database-connection.js",
+    "create-tables": "node create-email-tables.js",
+    "fix-db": "npm run test-db && npm run create-tables"
   },
   "dependencies": {
     "express": "^4.18.2",

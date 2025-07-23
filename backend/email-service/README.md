@@ -11,7 +11,7 @@ npm install
 
 ### 2. Configurar ambiente
 ```bash
-npm run setup
+npm run fix-db
 ```
 
 ### 3. Configurar SMTP
@@ -74,6 +74,21 @@ SMTP_PASS=sua-senha
 ```
 
 ## 🧪 Testes
+
+### Testar conexão com banco
+```bash
+npm run test-db
+```
+
+### Criar/verificar tabelas
+```bash
+npm run create-tables
+```
+
+### Configuração completa (recomendado)
+```bash
+npm run fix-db
+```
 
 ### Testar o serviço
 ```bash
@@ -141,9 +156,15 @@ Envia e-mail de recuperação de senha.
 ## 🐛 Solução de Problemas
 
 ### Erro: "Variáveis de ambiente faltando"
-1. Execute `npm run setup`
+1. Execute `npm run fix-db`
 2. Configure o arquivo `.env`
 3. Reinicie o serviço
+
+### Erro: "Access denied for user 'root'"
+1. Execute o script SQL: `fix-mysql-permissions.sql`
+2. Ou altere a senha: `mysqladmin -u root password "Evo@000#!"`
+3. Verifique se o MySQL está rodando
+4. Execute: `npm run test-db`
 
 ### Erro: "EAUTH - Invalid login"
 1. Verifique suas credenciais SMTP
@@ -155,6 +176,10 @@ Envia e-mail de recuperação de senha.
 2. Teste a conectividade de rede
 3. Verifique firewall/proxy
 
+### Erro: "Table doesn't exist"
+1. Execute: `npm run create-tables`
+2. Verifique se o banco 'vibe' existe
+3. Execute: `npm run fix-db` para configuração completa
 ## 📝 Logs
 
 O serviço gera logs detalhados:
