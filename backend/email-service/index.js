@@ -121,18 +121,27 @@ const transporter = nodemailer.createTransport({
 
 // Configuração do banco de dados
 const dbConfig = {
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: process.env.DB_PORT || 3306,
+  user: process.env.DB_USER || 'vibe_user',
+  password: process.env.DB_PASSWORD || 'vibe_password',
+  database: process.env.DB_NAME || 'vibe',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true
 };
 
 // Pool de conexões do banco
-const pool = mysql.createPool(dbConfig);
+let pool;
+try {
+  pool = mysql.createPool(dbConfig);
+  console.log('✅ Pool de conexões MySQL criado');
+} catch (error) {
+  console.error('❌ Erro ao criar pool MySQL:', error);
+}
 
 // Função para gerar código de verificação
 function generateVerificationCode() {
